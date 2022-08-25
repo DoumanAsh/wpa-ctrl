@@ -1,0 +1,24 @@
+[package]
+name = "wpa-ctrl"
+version = "0.1.0"
+edition = "2021"
+description = "WPA controller interface"
+readme = "README.md"
+repository = "https://github.com/DoumanAsh/wpa-ctrl"
+license = "BSL-1.0"
+keywords = ["wpa"]
+include = [
+    "src/*.rs",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE",
+]
+
+[dependencies]
+str-buf = "3"
+
+[dependencies.serde]
+version = "1"
+features = ["alloc", "derive"]
+default-features = false
+optional = true
