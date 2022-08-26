@@ -45,6 +45,7 @@
 //!- Optionally `disconnect`;
 //!- Run `reassociate` to start process of connecting to currently selected network
 
+#![cfg(unix)]
 #![warn(missing_docs)]
 #![cfg_attr(feature = "cargo-clippy", allow(clippy::style))]
 
@@ -263,7 +264,7 @@ impl WpaControlReq {
 
     #[inline]
     ///Creates REMOVE_NETWORK all request
-    pub fn remove_network_al() -> Self {
+    pub fn remove_network_all() -> Self {
         Self::raw("REMOVE_NETWORK all")
     }
 
