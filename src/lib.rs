@@ -254,12 +254,19 @@ impl WpaControlReq {
     }
 
     #[inline]
-    ///Creates DISABLE_NETWORK request
+    ///Creates REMOVE_NETWORK request
     pub fn remove_network(id: Id) -> Self {
         let mut this = Self::raw("REMOVE_NETWORK");
         let _ = write!(&mut this.buf, " {}", id.0);
         this
     }
+
+    #[inline]
+    ///Creates REMOVE_NETWORK all request
+    pub fn remove_network_al() -> Self {
+        Self::raw("REMOVE_NETWORK all")
+    }
+
 
     #[inline]
     ///Creates SAVE_CONFIG request

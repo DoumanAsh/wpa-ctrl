@@ -1,6 +1,6 @@
 [package]
 name = "wpa-ctrl"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "WPA controller interface"
 readme = "README.md"
