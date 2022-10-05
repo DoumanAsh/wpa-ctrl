@@ -220,7 +220,7 @@ impl WpaControlReq {
     }
 
     #[inline]
-    ///Creates SELECT_NETWORK request
+    ///Creates SET_NETWORK request
     pub fn set_network(id: Id, var: &str, value: impl fmt::Display) -> Self {
         let mut this = Self::raw("SET_NETWORK");
         let _ = write!(&mut this.buf, " {}", id.0);
@@ -744,6 +744,28 @@ impl WpaController {
             Some(Ok(Err(()))) => return Err(io::Error::new(io::ErrorKind::Other, format!("remove_network id={}", id.0))),
             Some(Err(error)) => return Err(error),
             None => return Err(io::Error::new(io::ErrorKind::Other, format!("remove_network id={} has no reply", id.0))),
+        }
+    }
+
+    ///Select a network for use by `id`.
+    pub fn select_network(&mut self, id: Id) -> Result<(), io::Error> {
+        self.request(WpaControlReq::select_network(id))?;
+        match self.recv_req_result() {
+            Some(Ok(Ok(()))) => Ok(()),
+            Some(Ok(Err(()))) => return Err(io::Error::new(io::ErrorKind::Other, format!("select_network id={}", id.0))),
+            Some(Err(error)) => return Err(error),
+            None => return Err(io::Error::new(io::ErrorKind::Other, format!("select_network id={} has no reply", id.0))),
+        }
+    }
+
+    ///Reconfigure wpa, i.e. reload wpasupplicant from saved config.
+    pub fn reconfigure(&mut self) -> Result<(), io::Error> {
+        self.request(WpaControlReq::raw("RECONFIGURE"))?;
+        match self.recv_req_result() {
+            Some(Ok(Ok(()))) => Ok(()),
+            Some(Ok(Err(r))) => return Err(io::Error::new(io::ErrorKind::Other, format!("reconfigure ret={:?}", r))),
+            Some(Err(error)) => return Err(error),
+            None => return Err(io::Error::new(io::ErrorKind::Other, format!("reconfigure completed"))),
         }
     }
 }
