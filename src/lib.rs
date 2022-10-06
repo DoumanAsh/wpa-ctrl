@@ -765,7 +765,7 @@ impl WpaController {
             Some(Ok(Ok(()))) => Ok(()),
             Some(Ok(Err(r))) => return Err(io::Error::new(io::ErrorKind::Other, format!("reconfigure ret={:?}", r))),
             Some(Err(error)) => return Err(error),
-            None => return Err(io::Error::new(io::ErrorKind::Other, format!("reconfigure completed"))),
+            None => return Err(io::Error::new(io::ErrorKind::Other, format!("reconfigure has no reply"))),
         }
     }
 }
