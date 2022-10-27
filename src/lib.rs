@@ -688,11 +688,12 @@ impl WpaController {
     ///
     ///- `ssid` - Network identifier;
     ///- `wpa_pass` - Passkey for WPA auth, if `None` sets `key_mgmt` to `None`
+    ///- `hidden` - Specifies whether you want to scan for SSID to connect to the network.
     ///
     ///# Result
     ///
     ///- `Ok(id)` - Newly created network id
-    pub fn add_network(&mut self, ssid: &str, wpa_pass: Option<&str>) -> Result<Id, io::Error> {
+    pub fn add_network(&mut self, ssid: &str, wpa_pass: Option<&str>, hidden: bool) -> Result<Id, io::Error> {
         self.request(WpaControlReq::add_network())?;
         let id = loop {
             match self.recv()? {
@@ -733,6 +734,16 @@ impl WpaController {
             },
         }
 
+        if hidden {
+            self.request(WpaControlReq::set_network(id, "scan_ssid", 1))?;
+            match self.recv_req_result() {
+                Some(Ok(Ok(()))) => (),
+                Some(Ok(Err(()))) => return Err(io::Error::new(io::ErrorKind::Other, format!("set_network id={} scan_ssid 1 failed", id.0))),
+                Some(Err(error)) => return Err(error),
+                None => return Err(io::Error::new(io::ErrorKind::Other, format!("set_network id={} scan_ssid 1 had no ok/fail reply", id.0))),
+            }
+        }
+
         Ok(id)
     }
 
@@ -765,7 +776,7 @@ impl WpaController {
             Some(Ok(Ok(()))) => Ok(()),
             Some(Ok(Err(r))) => return Err(io::Error::new(io::ErrorKind::Other, format!("reconfigure ret={:?}", r))),
             Some(Err(error)) => return Err(error),
-            None => return Err(io::Error::new(io::ErrorKind::Other, format!("reconfigure has no reply"))),
+            None => return Err(io::Error::new(io::ErrorKind::Other, "reconfigure has no reply".to_owned())),
         }
     }
 }
