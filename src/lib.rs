@@ -627,7 +627,6 @@ impl WpaController {
     #[inline]
     ///Sends request, returning number of bytes written.
     pub fn request(&mut self, req: WpaControlReq) -> Result<usize, io::Error> {
-        println!("req={:?}", req);
         self.socket.send(req.buf.as_bytes())
     }
 
