@@ -33,10 +33,8 @@
 //!- Optionally `scan` and check list of networks using `scan_results`
 //!- `add_network` which returns returns `id` of network
 //!- `set_network <id> ssid "network name"` which specifies network's name to associate with
-//!- `set_network <id> psk "WAP password"` which specifies WPA password, only usable when network
-//!requires WPA security
-//!- `set_network <id> key_mgmt NONE` which specifies no security, required to connect to networks
-//!without password
+//!- `set_network <id> psk "WAP password"` which specifies WPA password, only usable when network requires WPA security
+//!- `set_network <id> key_mgmt NONE` which specifies no security, required to connect to networks without password
 //!- `select_network <id>` - Select network for use.
 //!- `save_config` - Optionally to save configuration.
 //!
@@ -48,9 +46,6 @@
 #![cfg(unix)]
 #![warn(missing_docs)]
 #![cfg_attr(feature = "cargo-clippy", allow(clippy::style))]
-
-#[cfg(feature = "serde")]
-use serde::{Serialize, Deserialize};
 
 mod utils;
 
@@ -74,6 +69,41 @@ use core::{str, time};
 use core::sync::atomic::{AtomicU32, Ordering};
 use core::fmt::{self, Write};
 
+///Suffix Generator for socket name
+///
+///When wpa-control attempts to connect it shall bind unix socket with name `wpa_crtl_<counter>`
+///
+///Default implementation is implemented on ()
+pub trait SuffixGenerator {
+    ///Creates suffix for file name
+    fn generate_suffix(&self) -> u32;
+}
+
+impl SuffixGenerator for () {
+    fn generate_suffix(&self) -> u32 {
+        static COUNTER: AtomicU32 = AtomicU32::new(1);
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    }
+}
+
+///Options to control behavior when creating instance
+pub struct Options<S: SuffixGenerator> {
+    ///Method to generate socket name to bind to.
+    ///
+    ///When not used, it uses static counter
+    pub suffix: S
+}
+
+static DEFAULT_OPTIONS: Options<()> = Options {
+    suffix: ()
+};
+
+fn local_socket_name(generator: &impl SuffixGenerator) -> LocalSocketName {
+    let mut name = LocalSocketName::new();
+    let _ = write!(&mut name, "{}{}", LOCAL_SOCKET_PREFIX, generator.generate_suffix());
+    name
+}
+
 ///Surrounds value with quotes, useful when setting `ssid` or `psk`
 pub struct QuotedValue<T: fmt::Display>(pub T);
 
@@ -82,14 +112,6 @@ impl<T: fmt::Display> fmt::Display for QuotedValue<T> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.write_fmt(format_args!("\"{}\"", self.0))
     }
-}
-
-fn local_socket_name() -> LocalSocketName {
-    static COUNTER: AtomicU32 = AtomicU32::new(1);
-
-    let mut name = LocalSocketName::new();
-    let _ = write!(&mut name, "{}{}", LOCAL_SOCKET_PREFIX, COUNTER.fetch_add(1, Ordering::SeqCst));
-    name
 }
 
 ///Client builder
@@ -140,6 +162,13 @@ impl<'a> WpaControllerBuilder<'a> {
     pub fn open(self, interface: &str) -> Result<WpaController, io::Error> {
         let path = path::Path::new(self.root).join(interface);
         WpaController::open_path(&path)
+    }
+
+    #[inline]
+    ///Attempts to open socket with options.
+    pub fn open_with(self, interface: &str, options: &Options<impl SuffixGenerator>) -> Result<WpaController, io::Error> {
+        let path = path::Path::new(self.root).join(interface);
+        WpaController::open_path_with(&path, options)
     }
 }
 
@@ -298,7 +327,7 @@ pub struct Pong;
 
 #[derive(Copy, Clone, Debug)]
 #[repr(transparent)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde_derive::Serialize, serde_derive::Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 ///Network id
 pub struct Id(pub u32);
@@ -446,7 +475,7 @@ impl WpaStatus {
 
 ///Network's flag, describing its current state.
 #[derive(Clone, Copy, Debug, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde_derive::Serialize, serde_derive::Deserialize))]
 pub struct WpaNetworkFlags {
     ///Indicates that network is currently set to be used.
     pub current: bool,
@@ -490,7 +519,7 @@ impl WpaNetworkFlags {
 
 ///Network description
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde_derive::Serialize, serde_derive::Deserialize))]
 pub struct WpaNetwork {
     ///Network id
     pub id: Id,
@@ -610,10 +639,20 @@ impl WpaController {
         Self::open_path(path.as_ref())
     }
 
+    #[inline(always)]
     ///Attempts to connect to WPA controller at specified `path`
     pub fn open_path(path: &path::Path) -> Result<Self, io::Error> {
-        let local_name = local_socket_name();
+        Self::open_path_with(path, &DEFAULT_OPTIONS)
+    }
+
+    ///Attempts to connect to WPA controller at specified `path` with provided options
+    pub fn open_path_with(path: &path::Path, options: &Options<impl SuffixGenerator>) -> Result<Self, io::Error> {
+        let local_name = local_socket_name(&options.suffix);
         let local = path::Path::new(LOCAL_SOCKET_DIR).join(local_name.as_str());
+
+        //Attempt to remove file, if for some reason it exists
+        let _ = fs::remove_file(&local);
+
         let socket = UnixDatagram::bind(&local)?;
         let this = Self {
             buffer: [0; BUF_SIZE],

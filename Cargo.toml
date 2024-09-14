@@ -1,6 +1,6 @@
 [package]
 name = "wpa-ctrl"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 description = "WPA controller interface"
 readme = "README.md"
@@ -19,6 +19,13 @@ str-buf = "3"
 
 [dependencies.serde]
 version = "1"
-features = ["alloc", "derive"]
+features = ["alloc"]
 default-features = false
 optional = true
+
+[dependencies.serde_derive]
+version = "1"
+optional = true
+
+[features]
+serde = ["dep:serde", "serde_derive"]
