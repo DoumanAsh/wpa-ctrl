@@ -8,7 +8,7 @@
 //!const WPA_CTRL_BUILD: WpaControllerBuilder<'static> = WpaControllerBuilder::new();
 //!
 //!let mut ctrl = match WPA_CTRL_BUILD.open("wlan0") {
-//!    Ok(ctrl) => ctrl,
+//!    Ok(ctrl) => ctrl.into_buffered(),
 //!    Err(error) => panic!("Cannot open wlan0"),
 //!};
 //!
@@ -823,8 +823,11 @@ impl<'a> fmt::Debug for WpaControlMessage<'a> {
 }
 
 ///WPA controller
+///
+///All methods require to provide buffer to temporary hold data from the socket.
+///
+///Use `WpaController::into_buffered` to create wrapped instance with own buffer
 pub struct WpaController {
-    buffer: [u8; BUF_SIZE],
     socket: UnixDatagram,
     local: path::PathBuf,
 }
@@ -852,7 +855,6 @@ impl WpaController {
 
         let socket = UnixDatagram::bind(&local)?;
         let this = Self {
-            buffer: [0; BUF_SIZE],
             socket,
             local,
         };
@@ -860,18 +862,26 @@ impl WpaController {
         Ok(this)
     }
 
+    ///Wraps controller with builtin buffer.
+    pub fn into_buffered(self) -> BufferedWpaController {
+        BufferedWpaController {
+            inner: self,
+            buffer: [0; BUF_SIZE],
+        }
+    }
+
     #[inline]
     ///Sends request, returning number of bytes written.
-    pub fn request(&mut self, req: WpaControlReq) -> Result<usize, io::Error> {
+    pub fn request(&self, req: WpaControlReq) -> Result<usize, io::Error> {
         self.socket.send(req.buf.as_bytes())
     }
 
     ///Attempts to receive message.
-    pub fn recv(&mut self) -> Result<Option<WpaControlMessage<'_>>, io::Error> {
+    pub fn recv<'a>(&self, buffer: &'a mut [u8]) -> Result<Option<WpaControlMessage<'a>>, io::Error> {
         loop {
-            match self.socket.recv(&mut self.buffer) {
+            match self.socket.recv(buffer) {
                 Ok(len) => {
-                    let msg = match std::str::from_utf8(&self.buffer[..len]) {
+                    let msg = match core::str::from_utf8(&buffer[..len]) {
                         Ok(msg) => msg.trim(),
                         Err(error) => break Err(io::Error::new(io::ErrorKind::InvalidData, error))
                     };
@@ -894,14 +904,15 @@ impl WpaController {
     ///This method will continuously `recv` skipping `unsolicited` messages
     ///
     ///# Result
+    ///
     ///- Returns `None` if neither success or fail are present among replies.
     ///
     ///- `Ok(())` indicates success.
     ///
     ///- `Err(())` indicates failure.
-    pub fn recv_req_result(&mut self) -> Option<Result<Result<(), ()>, io::Error>> {
+    pub fn recv_req_result(&self, buffer: &mut [u8]) -> Option<Result<Result<(), ()>, io::Error>> {
         loop {
-            match self.recv() {
+            match self.recv(buffer) {
                 Ok(Some(msg)) => {
                     if msg.as_success().is_some() {
                         break Some(Ok(Ok(())));
@@ -928,10 +939,10 @@ impl WpaController {
     ///# Result
     ///
     ///- `Ok(id)` - Newly created network id
-    pub fn add_network(&mut self, ssid: &str, wpa_pass: Option<&str>, hidden: bool) -> Result<Id, io::Error> {
+    pub fn add_network(&self, ssid: &str, wpa_pass: Option<&str>, hidden: bool, buffer: &mut [u8]) -> Result<Id, io::Error> {
         self.request(WpaControlReq::add_network())?;
         let id = loop {
-            match self.recv()? {
+            match self.recv(buffer)? {
                 Some(msg) => match msg.as_network_id() {
                     Some(id) => break id,
                     None => continue,
@@ -941,7 +952,7 @@ impl WpaController {
         };
 
         self.request(WpaControlReq::set_network(id, "ssid", QuotedValue(ssid)))?;
-        match self.recv_req_result() {
+        match self.recv_req_result(buffer) {
             Some(Ok(Ok(()))) => (),
             Some(Ok(Err(()))) => return Err(io::Error::new(io::ErrorKind::Other, format!("set_network id={} ssid {} failed", id.0, QuotedValue(ssid)))),
             Some(Err(error)) => return Err(error),
@@ -951,7 +962,7 @@ impl WpaController {
             Some(wpa_pass) => {
                 let wpa_pass = QuotedValue(wpa_pass);
                 self.request(WpaControlReq::set_network(id, "psk", &wpa_pass))?;
-                match self.recv_req_result() {
+                match self.recv_req_result(buffer) {
                     Some(Ok(Ok(()))) => (),
                     Some(Ok(Err(()))) => return Err(io::Error::new(io::ErrorKind::Other, format!("set_network id={} psk {} failed", id.0, wpa_pass))),
                     Some(Err(error)) => return Err(error),
@@ -960,7 +971,7 @@ impl WpaController {
             },
             None => {
                 self.request(WpaControlReq::set_network(id, "key_mgmt", "NONE"))?;
-                match self.recv_req_result() {
+                match self.recv_req_result(buffer) {
                     Some(Ok(Ok(()))) => (),
                     Some(Ok(Err(()))) => return Err(io::Error::new(io::ErrorKind::Other, format!("set_network id={} key_mgmt NONE failed", id.0))),
                     Some(Err(error)) => return Err(error),
@@ -971,7 +982,7 @@ impl WpaController {
 
         if hidden {
             self.request(WpaControlReq::set_network(id, "scan_ssid", 1))?;
-            match self.recv_req_result() {
+            match self.recv_req_result(buffer) {
                 Some(Ok(Ok(()))) => (),
                 Some(Ok(Err(()))) => return Err(io::Error::new(io::ErrorKind::Other, format!("set_network id={} scan_ssid 1 failed", id.0))),
                 Some(Err(error)) => return Err(error),
@@ -983,9 +994,9 @@ impl WpaController {
     }
 
     ///Performs removal of known network by `id`.
-    pub fn remove_network(&mut self, id: Id) -> Result<(), io::Error> {
+    pub fn remove_network(&self, id: Id, buffer: &mut [u8]) -> Result<(), io::Error> {
         self.request(WpaControlReq::remove_network(id))?;
-        match self.recv_req_result() {
+        match self.recv_req_result(buffer) {
             Some(Ok(Ok(()))) => Ok(()),
             Some(Ok(Err(()))) => return Err(io::Error::new(io::ErrorKind::Other, format!("remove_network id={}", id.0))),
             Some(Err(error)) => return Err(error),
@@ -994,9 +1005,9 @@ impl WpaController {
     }
 
     ///Select a network for use by `id`.
-    pub fn select_network(&mut self, id: Id) -> Result<(), io::Error> {
+    pub fn select_network(&self, id: Id, buffer: &mut [u8]) -> Result<(), io::Error> {
         self.request(WpaControlReq::select_network(id))?;
-        match self.recv_req_result() {
+        match self.recv_req_result(buffer) {
             Some(Ok(Ok(()))) => Ok(()),
             Some(Ok(Err(()))) => return Err(io::Error::new(io::ErrorKind::Other, format!("select_network id={}", id.0))),
             Some(Err(error)) => return Err(error),
@@ -1005,9 +1016,9 @@ impl WpaController {
     }
 
     ///Reconfigure wpa, i.e. reload wpasupplicant from saved config.
-    pub fn reconfigure(&mut self) -> Result<(), io::Error> {
+    pub fn reconfigure(&self, buffer: &mut [u8]) -> Result<(), io::Error> {
         self.request(WpaControlReq::raw("RECONFIGURE"))?;
-        match self.recv_req_result() {
+        match self.recv_req_result(buffer) {
             Some(Ok(Ok(()))) => Ok(()),
             Some(Ok(Err(r))) => return Err(io::Error::new(io::ErrorKind::Other, format!("reconfigure ret={:?}", r))),
             Some(Err(error)) => return Err(error),
@@ -1021,5 +1032,69 @@ impl Drop for WpaController {
     fn drop(&mut self) {
         let _ = self.socket.shutdown(net::Shutdown::Both);
         let _ = fs::remove_file(&self.local);
+    }
+}
+
+///WpaController with own buffer
+pub struct BufferedWpaController {
+    buffer: [u8; BUF_SIZE],
+    inner: WpaController,
+}
+
+impl BufferedWpaController {
+    #[inline]
+    ///Sends request, returning number of bytes written.
+    pub fn request(&self, req: WpaControlReq) -> Result<usize, io::Error> {
+        self.inner.socket.send(req.buf.as_bytes())
+    }
+
+    ///Attempts to receive message.
+    pub fn recv(&mut self) -> Result<Option<WpaControlMessage<'_>>, io::Error> {
+        self.inner.recv(&mut self.buffer)
+    }
+
+    ///Attempts to receive reply for result of command.
+    ///
+    ///This method will continuously `recv` skipping `unsolicited` messages
+    ///
+    ///# Result
+    ///
+    ///- Returns `None` if neither success or fail are present among replies.
+    ///
+    ///- `Ok(())` indicates success.
+    ///
+    ///- `Err(())` indicates failure.
+    pub fn recv_req_result(&mut self) -> Option<Result<Result<(), ()>, io::Error>> {
+        self.inner.recv_req_result(&mut self.buffer)
+    }
+
+    ///Performs network add sequence
+    ///
+    ///# Arguments
+    ///
+    ///- `ssid` - Network identifier;
+    ///- `wpa_pass` - Passkey for WPA auth, if `None` sets `key_mgmt` to `None`
+    ///- `hidden` - Specifies whether you want to scan for SSID to connect to the network.
+    ///
+    ///# Result
+    ///
+    ///- `Ok(id)` - Newly created network id
+    pub fn add_network(&mut self, ssid: &str, wpa_pass: Option<&str>, hidden: bool) -> Result<Id, io::Error> {
+        self.inner.add_network(ssid, wpa_pass, hidden, &mut self.buffer)
+    }
+
+    ///Performs removal of known network by `id`.
+    pub fn remove_network(&mut self, id: Id) -> Result<(), io::Error> {
+        self.inner.remove_network(id, &mut self.buffer)
+    }
+
+    ///Select a network for use by `id`.
+    pub fn select_network(&mut self, id: Id) -> Result<(), io::Error> {
+        self.inner.select_network(id, &mut self.buffer)
+    }
+
+    ///Reconfigure wpa, i.e. reload wpasupplicant from saved config.
+    pub fn reconfigure(&mut self) -> Result<(), io::Error> {
+        self.inner.reconfigure(&mut self.buffer)
     }
 }
