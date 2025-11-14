@@ -45,7 +45,7 @@
 
 #![cfg(unix)]
 #![warn(missing_docs)]
-#![cfg_attr(feature = "cargo-clippy", allow(clippy::style))]
+#![allow(clippy::style, clippy::should_implement_trait)]
 
 mod utils;
 
@@ -62,6 +62,8 @@ const LOCAL_SOCKET_DIR: &str = "/tmp";
 const LOCAL_SOCKET_PREFIX: &str = "wpa_ctrl_";
 const UNSOLICITED_PREFIX: char = '<';
 type LocalSocketName = str_buf::StrBuf<23>;
+type BssidStr = str_buf::StrBuf<17>;
+type SsidStr = str_buf::StrBuf<32>;
 
 use std::os::unix::net::UnixDatagram;
 use std::{fs, io, path, net};
@@ -553,6 +555,185 @@ impl<'a> Iterator for WpaNetworkList<'a> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde_derive::Serialize, serde_derive::Deserialize))]
+///Describes network's auth method
+pub enum WpaAuth {
+    ///WPA2-EAP
+    Wpa2Eap,
+    ///WPA-EAP
+    WpaEap,
+    ///WPA2-PSK
+    Wpa2Psk,
+    ///WPA-PSK
+    WpaPsk,
+    ///Open network
+    Open
+}
+
+impl WpaAuth {
+    ///Returns textual representation
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Wpa2Eap => "WPA2-EAP",
+            Self::WpaEap => "WPA-EAP",
+            Self::Wpa2Psk => "WPA2-PSK",
+            Self::WpaPsk => "WPA-PSK",
+            Self::Open => "OPEN"
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde_derive::Serialize, serde_derive::Deserialize))]
+///Describes network's encryption method
+pub enum WpaEncryption {
+    ///No encryption
+    NONE,
+    ///Wired Equivalent Privacy
+    ///
+    ///Obsolete WPA's encryption
+    WEP,
+    ///Temporal Key Integrity Protocol
+    ///
+    ///Old WPA's encryption
+    TKIP,
+    ///Modern AES based encryption for WPA2
+    CCMP
+}
+
+impl WpaEncryption {
+    ///Returns textual representation
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::WEP => "WEP",
+            Self::TKIP => "TKIP",
+            Self::CCMP => "CCMP",
+            Self::NONE => "",
+        }
+    }
+
+    #[inline]
+    ///Indicates no encryption present
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::NONE)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde_derive::Serialize, serde_derive::Deserialize))]
+///Network's flags in scan results
+pub struct WpaScanResultFlags {
+    ///Auth method
+    pub auth: WpaAuth,
+    ///Encryption method
+    pub encryption: WpaEncryption,
+}
+
+impl WpaScanResultFlags {
+    ///Converts flag string into this struct
+    pub fn from_str(text: &str) -> Self {
+        WpaScanResultFlags {
+            auth: if text.starts_with("[WPA2-EAP") {
+                WpaAuth::Wpa2Eap
+            } else if text.starts_with("[WPA-EAP") {
+                WpaAuth::WpaEap
+            } else if text.starts_with("[WPA2-PSK") {
+                WpaAuth::Wpa2Psk
+            } else if text.starts_with("[WPA-PSK") {
+                WpaAuth::WpaPsk
+            } else {
+                WpaAuth::Open
+            },
+            encryption: if text.contains("-CCMP") {
+                WpaEncryption::CCMP
+            } else if text.contains("-TKIP") {
+                WpaEncryption::TKIP
+            } else if text.contains("WEP") {
+                WpaEncryption::WEP
+            } else {
+                WpaEncryption::NONE
+            }
+        }
+    }
+}
+
+impl fmt::Display for WpaScanResultFlags {
+    #[inline]
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.write_str(self.auth.as_str())?;
+        if !self.encryption.is_none() {
+            fmt.write_str("-")?;
+            fmt.write_str(self.encryption.as_str())?
+        }
+        Ok(())
+    }
+}
+
+///Scan result's item description
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde_derive::Serialize, serde_derive::Deserialize))]
+pub struct WpaScanResult {
+    ///Network's BSSID. Can be empty string, when not set.
+    pub bssid: BssidStr,
+    ///Network's frequency
+    pub freq: u32,
+    ///Network's signal level in decibel(dBm)
+    pub level: i16,
+    ///Network's flag
+    pub flags: WpaScanResultFlags,
+    ///Network's SSID. Should not be empty normally
+    pub ssid: SsidStr,
+}
+
+impl WpaScanResult {
+    ///Returns signal level in percentage of range 0..=100
+    ///
+    ///Calculates as following: 2 * (dBm + 100)  where dBm: [-100 to -50]
+    pub fn singal_level_percent(&self) -> u8 {
+        if self.level <= -100 {
+            0u8
+        } else if self.level >= -50 {
+            100u8
+        } else {
+            2i16.saturating_mul(self.level.saturating_add(100)) as u8
+        }
+    }
+}
+
+///Iterator over list of networks
+pub struct WpaScanResults<'a> {
+    lines: str::Lines<'a>,
+}
+
+impl<'a> Iterator for WpaScanResults<'a> {
+    type Item = WpaScanResult;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let line = self.lines.next()?;
+        let mut parts = line.splitn(5, '\t');
+
+        let mut bssid = BssidStr::new();
+        bssid.push_str(parts.next()?);
+
+        let result = WpaScanResult {
+            bssid,
+            freq: parts.next()?.parse().ok()?,
+            //Assume quality is too bad if we cannot fit?
+            level: parts.next()?.parse().unwrap_or(-100),
+            flags: WpaScanResultFlags::from_str(parts.next().unwrap_or("")),
+            ssid: {
+                let mut ssid = SsidStr::new();
+                ssid.push_str(parts.next()?);
+                ssid
+            }
+        };
+
+        Some(result)
+    }
+}
+
 ///Message.
 pub struct WpaControlMessage<'a> {
     ///Raw content of message
@@ -615,6 +796,22 @@ impl<'a> WpaControlMessage<'a> {
         } else {
             None
         }
+    }
+
+    ///Attempts to reinterpret message as scan results
+    pub fn as_scan_results(&self) -> Option<WpaScanResults<'_>> {
+        let mut lines = self.raw.lines();
+        let line = lines.next().unwrap();
+        let header = utils::split::<5>(line, '/')?;
+        //bssid / frequency / signal level / flags / ssid
+        if header[0] == "bssid" && header[1] == "frequency" && header[2] == "signal level" && header[3] == "flags" && header[4] == "ssid" {
+            Some(WpaScanResults {
+                lines
+            })
+        } else {
+            None
+        }
+
     }
 }
 

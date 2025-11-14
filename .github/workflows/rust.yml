@@ -2,47 +2,23 @@ name: Rust
 
 on:
   push:
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
+      - '.gitignore'
     branches:
-      - master
-    paths:
-      - '.github/workflows/rust.yml'
-      - 'src/**.rs'
-      - 'tests/**'
-      - 'Cargo.toml'
+      - 'master'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches:
-      - '**'
-    paths:
-      - '.github/workflows/rust.yml'
-      - 'src/**.rs'
-      - 'tests/**'
-      - 'Cargo.toml'
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
+      - '.gitignore'
 
 jobs:
-  full-test:
-    runs-on: ubuntu-latest
+  check:
     if: github.event.pull_request.draft == false
-
-    steps:
-    - uses: actions/checkout@v1
-
-    - name: Install Rust Unix
-      run: |
-        if rustup --version >/dev/null 2>&1; then
-            rustup update
-        else
-             curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
-             echo ::add-path::$HOME/.cargo/bin
-        fi
-
-    - name: Rust version
-      run: |
-        cargo --version
-        rustc --version
-
-    - name: Lint
-      run: cargo clippy --features serde
-
-    - name: Test
-      run: cargo test --features serde
+    uses: DoumanAsh/douman-ci/.github/workflows/rust.yml@master
+    with:
+      cargo-no-features: true
+      cargo-features: "serde"
