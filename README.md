@@ -1,6 +1,6 @@
 # wpa-ctrl
 
-![Rust](https://github.com/DoumanAsh/wpa-ctrl/workflows/Rust/badge.svg?branch=master)
+[![Rust](https://github.com/DoumanAsh/wpa-ctrl/actions/workflows/rust.yml/badge.svg)](https://github.com/DoumanAsh/wpa-ctrl/actions/workflows/rust.yml)
 [![Crates.io](https://img.shields.io/crates/v/wpa-ctrl.svg)](https://crates.io/crates/wpa-ctrl)
 [![Documentation](https://docs.rs/wpa-ctrl/badge.svg)](https://docs.rs/crate/wpa-ctrl/)
 
