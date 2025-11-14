@@ -12,7 +12,7 @@ use wpa_ctrl::{WpaControlReq, WpaControllerBuilder};
 const WPA_CTRL_BUILD: WpaControllerBuilder<'static> = WpaControllerBuilder::new();
 
 let mut ctrl = match WPA_CTRL_BUILD.open("wlan0") {
-    Ok(ctrl) => ctrl,
+    Ok(ctrl) => ctrl.into_buffered(),
     Err(error) => panic!("Cannot open wlan0"),
 };
 

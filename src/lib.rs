@@ -1048,11 +1048,13 @@ impl BufferedWpaController {
         self.inner.socket.send(req.buf.as_bytes())
     }
 
+    #[inline]
     ///Attempts to receive message.
     pub fn recv(&mut self) -> Result<Option<WpaControlMessage<'_>>, io::Error> {
         self.inner.recv(&mut self.buffer)
     }
 
+    #[inline]
     ///Attempts to receive reply for result of command.
     ///
     ///This method will continuously `recv` skipping `unsolicited` messages
@@ -1068,6 +1070,7 @@ impl BufferedWpaController {
         self.inner.recv_req_result(&mut self.buffer)
     }
 
+    #[inline]
     ///Performs network add sequence
     ///
     ///# Arguments
@@ -1083,16 +1086,19 @@ impl BufferedWpaController {
         self.inner.add_network(ssid, wpa_pass, hidden, &mut self.buffer)
     }
 
+    #[inline]
     ///Performs removal of known network by `id`.
     pub fn remove_network(&mut self, id: Id) -> Result<(), io::Error> {
         self.inner.remove_network(id, &mut self.buffer)
     }
 
+    #[inline]
     ///Select a network for use by `id`.
     pub fn select_network(&mut self, id: Id) -> Result<(), io::Error> {
         self.inner.select_network(id, &mut self.buffer)
     }
 
+    #[inline]
     ///Reconfigure wpa, i.e. reload wpasupplicant from saved config.
     pub fn reconfigure(&mut self) -> Result<(), io::Error> {
         self.inner.reconfigure(&mut self.buffer)
