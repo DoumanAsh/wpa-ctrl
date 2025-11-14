@@ -63,6 +63,7 @@ const LOCAL_SOCKET_PREFIX: &str = "wpa_ctrl_";
 const UNSOLICITED_PREFIX: char = '<';
 type LocalSocketName = str_buf::StrBuf<23>;
 type BssidStr = str_buf::StrBuf<17>;
+type SsidStr = str_buf::StrBuf<32>;
 
 use std::os::unix::net::UnixDatagram;
 use std::{fs, io, path, net};
@@ -681,8 +682,8 @@ pub struct WpaScanResult {
     pub level: i16,
     ///Network's flag
     pub flags: WpaScanResultFlags,
-    ///Network's SSID. Can be empty string, when not set.
-    pub ssid: String,
+    ///Network's SSID. Should not be empty normally
+    pub ssid: SsidStr,
 }
 
 impl WpaScanResult {
@@ -712,15 +713,21 @@ impl<'a> Iterator for WpaScanResults<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let line = self.lines.next()?;
         let mut parts = line.splitn(5, '\t');
+
         let mut bssid = BssidStr::new();
         bssid.push_str(parts.next()?);
+
         let result = WpaScanResult {
             bssid,
             freq: parts.next()?.parse().ok()?,
             //Assume quality is too bad if we cannot fit?
             level: parts.next()?.parse().unwrap_or(-100),
             flags: WpaScanResultFlags::from_str(parts.next().unwrap_or("")),
-            ssid: parts.next()?.to_owned(),
+            ssid: {
+                let mut ssid = SsidStr::new();
+                ssid.push_str(parts.next()?);
+                ssid
+            }
         };
 
         Some(result)
