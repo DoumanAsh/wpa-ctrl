@@ -59,7 +59,7 @@ compile_error!("Supports only unix targets");
 const LOCAL_SOCKET_DIR: &str = "/data/misc/wifi/sockets";
 #[cfg(not(target_os = "android"))]
 const LOCAL_SOCKET_DIR: &str = "/tmp";
-const LOCAL_SOCKET_PREFIX: &str = "wpa_crtl_";
+const LOCAL_SOCKET_PREFIX: &str = "wpa_ctrl_";
 const UNSOLICITED_PREFIX: char = '<';
 type LocalSocketName = str_buf::StrBuf<23>;
 
